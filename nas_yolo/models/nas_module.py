@@ -285,6 +285,7 @@ class NoiseAwareStateModule(nn.Module):
         d_state: int = 16,
         d_conv: int = 4,
         use_noise_gate: bool = True,
+        noise_dim: int = 32,
     ):
         super().__init__()
         self.use_noise_gate = use_noise_gate
@@ -300,7 +301,7 @@ class NoiseAwareStateModule(nn.Module):
         if use_noise_gate:
             from .noise_gate import NoiseAwareGate
             self.noise_gates = nn.ModuleList([
-                NoiseAwareGate(ch) for ch in channels_list
+                NoiseAwareGate(ch, noise_dim=noise_dim) for ch in channels_list
             ])
 
         # Confidence refinement head: smooths objectness scores temporally

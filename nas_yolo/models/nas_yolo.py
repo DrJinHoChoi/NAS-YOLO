@@ -145,6 +145,7 @@ class NASYOLO(nn.Module):
                 d_state=d_state,
                 d_conv=d_conv,
                 use_noise_gate=use_noise_gate,
+                noise_dim=noise_dim,
             )
 
             # Temporal buffer for state management
