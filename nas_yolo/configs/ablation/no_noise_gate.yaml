@@ -13,7 +13,7 @@ model:
   use_temporal: true            # SSM still active
 
 training:
-  epochs: 300
+  epochs: 100
   batch_size: 16
   temporal_training: false
 

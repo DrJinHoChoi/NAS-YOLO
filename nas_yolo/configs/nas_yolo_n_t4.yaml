@@ -17,7 +17,7 @@ model:
   ema_momentum: 0.9
 
 training:
-  epochs: 300
+  epochs: 100
   batch_size: 16              # T4 16GB에 맞춤
   warmup_epochs: 5
   base_lr: 0.01

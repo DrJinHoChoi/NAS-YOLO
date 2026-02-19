@@ -12,7 +12,7 @@ model:
   use_temporal: false          # ← ABLATION: disable temporal state
 
 training:
-  epochs: 300
+  epochs: 100
   batch_size: 16
   temporal_training: false
 

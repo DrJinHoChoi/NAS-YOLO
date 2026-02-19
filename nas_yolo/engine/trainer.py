@@ -75,7 +75,7 @@ class Trainer:
 
         # Default config
         self.config = {
-            "epochs": 300,
+            "epochs": 100,
             "warmup_epochs": 5,
             "base_lr": 0.01,
             "min_lr": 1e-5,

@@ -456,7 +456,7 @@ RT-DETR-R18~\cite{rtdetr},
 Gold-YOLO-n/s~\cite{goldyolo}.
 
 \paragraph{Implementation.}
-All models use $640 \times 640$ input. Training: 300 epochs, SGD with cosine LR (0.01$\to$1e-5), batch size 16, mosaic augmentation.
+All models use $640 \times 640$ input. Training: 100 epochs, SGD with cosine LR (0.01$\to$1e-5), batch size 16, mosaic augmentation.
 Temporal training: $T=5$ pseudo-frames, random corruption types, $\lambda_\text{TCL}=0.5$.
 Evaluation: mAP@50:95 (COCO protocol), mAP-C (mean across all corruptions/severities), BSI ($T=10$ pseudo-temporal frames), FPS on NVIDIA RTX 3090.
 
