@@ -1,0 +1,20 @@
+# =============================================================================
+# Ablation: NAS-YOLO without Temporal State Module
+# =============================================================================
+# Tests contribution C1 by disabling the SSM-based temporal modeling.
+# Expected: lower BSI, similar clean mAP, worse mAP-C
+# =============================================================================
+
+model:
+  num_classes: 80
+  model_scale: "small"
+  use_noise_gate: false       # No gating without temporal
+  use_temporal: false          # ← ABLATION: disable temporal state
+
+training:
+  epochs: 300
+  batch_size: 16
+  temporal_training: false
+
+output:
+  dir: "runs/ablation/no_temporal"

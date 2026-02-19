@@ -1,0 +1,23 @@
+# =============================================================================
+# Ablation: NAS-YOLO without Temporal Consistency Loss
+# =============================================================================
+# Tests the contribution of TCL by setting its weight to 0.
+# Temporal SSM and noise gate are still active.
+# Expected: similar mAP, worse BSI
+# =============================================================================
+
+model:
+  num_classes: 80
+  model_scale: "small"
+  use_noise_gate: true
+  use_temporal: true
+
+training:
+  epochs: 300
+  batch_size: 16
+  temporal_training: true
+  sequence_length: 5
+  tcl_weight: 0.0              # ← ABLATION: disable TCL
+
+output:
+  dir: "runs/ablation/no_tcl"

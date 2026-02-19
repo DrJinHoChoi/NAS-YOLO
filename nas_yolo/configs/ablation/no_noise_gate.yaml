@@ -1,0 +1,21 @@
+# =============================================================================
+# Ablation: NAS-YOLO without Noise-Aware Gating
+# =============================================================================
+# Tests contribution C2 by disabling noise-conditioned gating.
+# The temporal SSM still operates but without noise adaptation.
+# Expected: lower mAP-C, moderate BSI improvement
+# =============================================================================
+
+model:
+  num_classes: 80
+  model_scale: "small"
+  use_noise_gate: false        # ← ABLATION: disable noise gating
+  use_temporal: true            # SSM still active
+
+training:
+  epochs: 300
+  batch_size: 16
+  temporal_training: false
+
+output:
+  dir: "runs/ablation/no_noise_gate"

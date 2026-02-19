@@ -1,0 +1,22 @@
+# =============================================================================
+# Ablation: Temporal Window Length Study
+# =============================================================================
+# Tests the effect of pseudo-temporal sequence length on BSI and mAP.
+# Run this config with different sequence_length values: 1, 3, 5, 7
+# =============================================================================
+
+model:
+  num_classes: 80
+  model_scale: "small"
+  use_noise_gate: true
+  use_temporal: true
+
+training:
+  epochs: 300
+  batch_size: 16
+  temporal_training: true
+  sequence_length: 5            # ← VARY: 1, 3, 5, 7
+  tcl_weight: 0.5
+
+output:
+  dir: "runs/ablation/window_T5"   # ← Change per experiment

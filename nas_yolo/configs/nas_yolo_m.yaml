@@ -1,0 +1,27 @@
+# =============================================================================
+# NAS-YOLO-m (Medium) — Accuracy-Focused Configuration
+# =============================================================================
+# Target: Higher accuracy with moderate computational overhead
+# =============================================================================
+
+model:
+  num_classes: 80
+  model_scale: "medium"
+  use_noise_gate: true
+  use_temporal: true
+  noise_dim: 32
+  ema_momentum: 0.9
+
+training:
+  epochs: 300
+  batch_size: 8
+  base_lr: 0.01
+  amp: true
+
+  # Enable temporal training for medium model
+  temporal_training: true
+  sequence_length: 5
+  tcl_weight: 0.5
+
+output:
+  dir: "runs/nas_yolo_m"

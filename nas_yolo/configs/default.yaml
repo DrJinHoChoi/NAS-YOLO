@@ -1,0 +1,95 @@
+# =============================================================================
+# NAS-YOLO Default Configuration
+# =============================================================================
+# "We turn object detection from frame-wise perception into state-aware perception."
+#
+# This is the default configuration for NAS-YOLO-s (small) training on COCO.
+# Override specific values via command line or custom config files.
+# =============================================================================
+
+# --- Model ---
+model:
+  num_classes: 80
+  model_scale: "small"       # nano, small, medium, large
+  in_channels: 3
+  use_noise_gate: true       # C2: Noise-Aware Gating
+  use_temporal: true          # C1: Temporal State Module
+  noise_dim: 32
+  ema_momentum: 0.9
+  pretrained_backbone: null   # Path to pretrained backbone weights
+
+# --- Data ---
+data:
+  train_root: "data/coco/train2017"
+  train_ann: "data/coco/annotations/instances_train2017.json"
+  val_root: "data/coco/val2017"
+  val_ann: "data/coco/annotations/instances_val2017.json"
+  img_size: [640, 640]
+  num_workers: 8
+  max_labels: 100
+
+# --- Training ---
+training:
+  epochs: 300
+  batch_size: 16
+  warmup_epochs: 5
+  base_lr: 0.01
+  min_lr: 0.00001
+  weight_decay: 0.0005
+  momentum: 0.937
+  amp: true                   # Mixed precision training
+  grad_accum_steps: 1
+  clip_grad_norm: 10.0
+  save_interval: 10
+  eval_interval: 10
+  log_interval: 50
+
+  # Temporal training (pseudo-temporal sequences from static images)
+  temporal_training: false
+  sequence_length: 5
+  corruption_type: "gaussian_noise"
+  tcl_weight: 0.5            # Temporal Consistency Loss weight
+  tcl_ema: 0.95
+
+# --- Augmentation ---
+augmentation:
+  mosaic: true
+  mixup: true
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  flip_p: 0.5
+  scale_range: [0.5, 1.5]
+  translate: 0.1
+
+  # Corruption augmentation (for robustness training)
+  corruption_aug: false
+  corruption_types: ["gaussian_noise", "motion_blur", "fog", "low_light"]
+  corruption_severity_range: [1, 3]
+  corruption_p: 0.3
+
+# --- Evaluation ---
+evaluation:
+  conf_threshold: 0.25
+  nms_threshold: 0.45
+  iou_thresholds: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+
+  # Corruption robustness evaluation
+  eval_corruption: true
+  corruption_severities: [1, 2, 3, 4, 5]
+
+  # Box Stability evaluation
+  eval_stability: true
+  stability_iou_threshold: 0.5
+  stability_score_threshold: 0.25
+
+# --- Distributed ---
+distributed:
+  backend: "nccl"
+  world_size: 1
+
+# --- Output ---
+output:
+  dir: "runs/nas_yolo_s"
+  save_best: true
+  save_last: true

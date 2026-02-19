@@ -1,0 +1,29 @@
+# NAS-YOLO: Noise-Aware State Modeling for Robust Real-Time Object Detection
+# ===========================================================================
+
+# Core
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+Pillow>=9.5.0
+
+# Configuration
+PyYAML>=6.0
+pydantic>=2.0
+
+# Training & Logging
+tensorboard>=2.14.0
+# wandb>=0.15.0  # Optional: uncomment for W&B logging
+
+# Evaluation
+pycocotools>=2.0.7
+
+# Profiling
+# fvcore>=0.1.5  # Optional: for accurate FLOPs computation
+# thop>=0.1.1    # Optional: alternative FLOPs counter
+
+# Testing
+pytest>=7.0.0
+
+# Visualization
+matplotlib>=3.7.0

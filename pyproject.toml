@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "nas-yolo"
+version = "0.1.0"
+description = "NAS-YOLO: Noise-Aware State Modeling for Robust Real-Time Object Detection"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Apache-2.0"}
+
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "numpy>=1.24.0",
+    "Pillow>=9.5.0",
+    "PyYAML>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+train = [
+    "tensorboard>=2.14.0",
+    "wandb>=0.15.0",
+]
+eval = [
+    "pycocotools>=2.0.7",
+    "matplotlib>=3.7.0",
+]
+baselines = [
+    "ultralytics>=8.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "flake8>=6.0.0",
+]
+all = [
+    "nas-yolo[train,eval,baselines,dev]",
+]
+
+[tool.setuptools.packages.find]
+include = ["nas_yolo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["nas_yolo/tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
