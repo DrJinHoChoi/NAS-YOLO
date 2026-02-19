@@ -21,7 +21,8 @@ venv*/
 
 # Training artifacts
 runs/
-data/
+/data/
+!nas_yolo/data/
 *.pt
 *.pth
 *.onnx
