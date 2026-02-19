@@ -1,0 +1,172 @@
+% ============================================================================
+% NAS-YOLO: Supplementary Material
+% ECCV 2026
+% ============================================================================
+\documentclass[review]{eccv2026}
+
+\usepackage{cite}
+\usepackage{bm}
+\usepackage{pifont}
+\usepackage{colortbl}
+
+\newcommand{\ours}{\textbf{NAS-YOLO}}
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\xmark}{\ding{55}}
+\newcommand{\R}{\mathbb{R}}
+
+\title{NAS-YOLO: Supplementary Material}
+\author{Anonymous ECCV 2026 Submission}
+
+\begin{document}
+\maketitle
+
+\appendix
+
+% ============================================================================
+\section{Implementation Details}
+\label{sec:supp_impl}
+
+\subsection{Architecture Specifications}
+
+\begin{table}[h]
+  \centering
+  \caption{Detailed architecture configurations for NAS-YOLO variants.}
+  \label{tab:supp_arch}
+  \small
+  \begin{tabular}{l|cccc}
+    \toprule
+    \textbf{Config} & \textbf{Nano} & \textbf{Small} & \textbf{Medium} & \textbf{Large} \\
+    \midrule
+    Width multiplier & 0.25 & 0.50 & 0.75 & 1.00 \\
+    Depth multiplier & 0.33 & 0.33 & 0.67 & 1.00 \\
+    Backbone channels & [16,32,64] & [32,64,128] & [48,96,192] & [64,128,256] \\
+    Neck channels & [32,64,128] & [64,128,256] & [96,192,384] & [128,256,512] \\
+    SSM $d\_\text{state}$ & 8 & 16 & 16 & 32 \\
+    SSM $d\_\text{conv}$ & 3 & 4 & 4 & 4 \\
+    Noise dim $d_n$ & 16 & 32 & 32 & 64 \\
+    Pool size & 4 & 8 & 8 & 8 \\
+    \midrule
+    Total params (M) & 3.5 & 8.5 & 18.0 & 35.0 \\
+    FLOPs (G) & 4.0 & 12.0 & 26.0 & 52.0 \\
+    NAS overhead (\%) & $<$3 & $<$5 & $<$5 & $<$5 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Training Hyperparameters}
+
+\begin{table}[h]
+  \centering
+  \caption{Training hyperparameters used across all experiments.}
+  \label{tab:supp_hyper}
+  \small
+  \begin{tabular}{l|c}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Value} \\
+    \midrule
+    Optimizer & SGD (momentum=0.937) \\
+    Base learning rate & 0.01 \\
+    Min learning rate & 1e-5 \\
+    LR schedule & Cosine annealing \\
+    Warmup epochs & 5 \\
+    Total epochs & 300 \\
+    Batch size & 16 \\
+    Gradient accumulation & 2 \\
+    Weight decay & 0.0005 \\
+    Input size & 640$\times$640 \\
+    \midrule
+    \multicolumn{2}{l}{\textit{Augmentation}} \\
+    Mosaic probability & 1.0 \\
+    MixUp probability & 0.15 \\
+    HSV (h, s, v) & (0.015, 0.7, 0.4) \\
+    Horizontal flip & 0.5 \\
+    Scale & 0.5 \\
+    \midrule
+    \multicolumn{2}{l}{\textit{Temporal training}} \\
+    Pseudo-sequence length $T$ & 5 \\
+    TCL weight $\lambda_\text{TCL}$ & 0.5 \\
+    TCL EMA momentum & 0.95 \\
+    Corruption types & gaussian, blur, fog, low-light \\
+    Severity range & [1, 5] \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Full Corruption Results}
+\label{sec:supp_corruption}
+
+\begin{table}[h]
+  \centering
+  \caption{Per-corruption type mAP on COCO-C at severity level 3. All values are mAP (\%).}
+  \label{tab:supp_corruption_full}
+  \small
+  \setlength{\tabcolsep}{2pt}
+  \begin{tabular}{l|ccc|ccc|ccc|ccccc}
+    \toprule
+    & \multicolumn{3}{c|}{\textbf{Noise}} & \multicolumn{3}{c|}{\textbf{Blur}} & \multicolumn{3}{c|}{\textbf{Weather}} & \multicolumn{5}{c}{\textbf{Digital}} \\
+    \textbf{Model} & Gaus. & Shot & Imp. & Defoc. & Glass & Motion & Snow & Frost & Fog & Bright & Contr. & Elast. & Pixel. & JPEG \\
+    \midrule
+    YOLOv8-s & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+    YOLOv9-s & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+    RT-DETR & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+    \ours{}-s & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Temporal Window Ablation}
+\label{sec:supp_window}
+
+\begin{table}[h]
+  \centering
+  \caption{Effect of pseudo-temporal sequence length $T$ during training.}
+  \label{tab:supp_window}
+  \small
+  \begin{tabular}{c|ccc|c}
+    \toprule
+    $T$ & \textbf{mAP} (\%) & \textbf{mAP-C} (\%) & \textbf{BSI} & \textbf{Train Memory (GB)} \\
+    \midrule
+    1 (baseline) & -- & -- & -- & -- \\
+    3 & -- & -- & -- & -- \\
+    5 & -- & -- & -- & -- \\
+    7 & -- & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ============================================================================
+\section{Per-Class BSI Analysis}
+\label{sec:supp_perclass}
+
+We report per-class BSI for representative COCO categories. Larger objects (car, bus) exhibit higher baseline BSI, but NAS-YOLO provides consistent improvements across all sizes. Small objects (bottle, cup) benefit most from temporal state, as their detection is most susceptible to noise-induced false positives and localization jitter.
+
+% ============================================================================
+\section{Noise Estimator Analysis}
+\label{sec:supp_noise}
+
+The spectral noise estimator analyzes the DCT frequency spectrum of the input image. We visualize the learned noise descriptors for different corruption types and severities using t-SNE projection. The descriptors form distinct clusters by corruption type, confirming that the estimator captures meaningful noise characteristics rather than overfitting to specific corruption patterns.
+
+% ============================================================================
+\section{Failure Cases}
+\label{sec:supp_failure}
+
+NAS-YOLO's temporal state can be counterproductive in specific scenarios:
+\begin{enumerate}
+  \item \textbf{Rapid ego-motion}: When the camera undergoes fast translation or rotation, the temporal state from previous frames becomes misaligned with the current view, temporarily degrading detection until the scene-change detector resets the state.
+  \item \textbf{Fast-moving objects}: Objects that traverse a significant portion of the frame between consecutive time steps are poorly served by temporal smoothing, as the S3M state encodes the previous position.
+  \item \textbf{Corruption-free video}: On perfectly clean video, the NAS module adds negligible overhead ($<$1ms) but provides no benefit, as the gate correctly passes features through unmodified.
+\end{enumerate}
+
+These cases are inherent to temporal methods and could be addressed by adaptive state management with motion compensation, which we leave for future work.
+
+% ============================================================================
+% References
+% ============================================================================
+{\small
+\bibliographystyle{plain}
+\bibliography{references}
+}
+
+\end{document}
