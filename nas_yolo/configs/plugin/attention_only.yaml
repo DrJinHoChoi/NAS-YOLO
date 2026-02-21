@@ -1,0 +1,9 @@
+# NASPlugin Attention-only (ablation)
+plugin:
+  profile: "edge"
+  mode: "attention"
+  use_noise_gate: false
+  noise_dim: 32
+  pool_size: 8
+  in_channels: 3
+  ema_momentum: 0.9

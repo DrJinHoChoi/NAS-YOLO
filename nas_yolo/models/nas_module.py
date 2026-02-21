@@ -286,16 +286,39 @@ class NoiseAwareStateModule(nn.Module):
         d_conv: int = 4,
         use_noise_gate: bool = True,
         noise_dim: int = 32,
+        block_type: str = "ssm",
+        profile: str = "edge",
+        mode: str = "hybrid",
     ):
         super().__init__()
         self.use_noise_gate = use_noise_gate
         self.num_scales = len(channels_list)
+        self.block_type = block_type
 
-        # Per-scale SSM adapters
-        self.ssm_adapters = nn.ModuleList([
-            SpatialSSMAdapter(ch, d_state=d_state, d_conv=d_conv)
-            for ch in channels_list
-        ])
+        if block_type == "hybrid":
+            from .mamba_attention import MambaAttentionBlock, PROFILE_CONFIGS
+            pcfg = PROFILE_CONFIGS.get(profile, PROFILE_CONFIGS["edge"])
+            self.ssm_adapters = nn.ModuleList([
+                MambaAttentionBlock(
+                    channels=ch,
+                    d_state=pcfg["d_state"],
+                    d_conv=min(d_conv, 4),
+                    expand=pcfg["expand"],
+                    attention_type=pcfg["attention_type"],
+                    num_heads=pcfg["num_heads"],
+                    window_size=pcfg["window_size"],
+                    noise_dim=noise_dim,
+                    router_type=pcfg["router_type"],
+                    mode=mode,
+                )
+                for ch in channels_list
+            ])
+        else:
+            # Per-scale SSM adapters (original)
+            self.ssm_adapters = nn.ModuleList([
+                SpatialSSMAdapter(ch, d_state=d_state, d_conv=d_conv)
+                for ch in channels_list
+            ])
 
         # Noise-aware gating (imported separately for modularity)
         if use_noise_gate:
@@ -343,8 +366,12 @@ class NoiseAwareStateModule(nn.Module):
         confidence_weights = []
 
         for i, (feat, state) in enumerate(zip(features, states)):
-            # Step 1: Temporal state propagation via SSM
-            ssm_out, new_state = self.ssm_adapters[i](feat, state)
+            # Step 1: Temporal state propagation via SSM (or hybrid block)
+            if self.block_type == "hybrid":
+                nl = noise_level[i] if isinstance(noise_level, list) else noise_level
+                ssm_out, new_state = self.ssm_adapters[i](feat, state, nl)
+            else:
+                ssm_out, new_state = self.ssm_adapters[i](feat, state)
 
             # Step 2: Noise-aware gating (adaptive blend of current vs. state)
             if self.use_noise_gate and noise_level is not None:

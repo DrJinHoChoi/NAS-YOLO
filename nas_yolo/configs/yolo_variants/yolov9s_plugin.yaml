@@ -1,0 +1,40 @@
+# YOLOv9-s + NASPlugin
+model:
+  yolo_variant: "yolov9s"
+  pretrained_weights: "yolov9-s"
+  framework: "yolov9"
+  num_classes: 80
+  channels_list: [128, 256, 512]
+
+plugin:
+  profile: "edge"
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 8
+
+training:
+  stage1_epochs: 15
+  stage2_epochs: 85
+  batch_size: 16
+  base_lr: 0.01
+  weight_decay: 0.0005
+  warmup_epochs: 3
+  amp: true
+  temporal_training: true
+  sequence_length: 5
+  tcl_weight: 0.5
+
+augmentation:
+  corruption_aug: true
+  corruption_p: 0.3
+  mosaic: true
+  mixup: 0.1
+
+data:
+  train: "coco/train2017"
+  val: "coco/val2017"
+  img_size: 640
+
+output:
+  dir: "runs/yolov9s_hybrid"

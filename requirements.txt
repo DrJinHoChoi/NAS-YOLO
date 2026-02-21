@@ -18,6 +18,10 @@ tensorboard>=2.14.0
 # Evaluation
 pycocotools>=2.0.7
 
+# YOLO Plugin Integration
+ultralytics>=8.1.0    # YOLOv8/v10/v11/v12 pretrained models
+einops>=0.7.0         # Efficient tensor operations
+
 # Profiling
 # fvcore>=0.1.5  # Optional: for accurate FLOPs computation
 # thop>=0.1.1    # Optional: alternative FLOPs counter

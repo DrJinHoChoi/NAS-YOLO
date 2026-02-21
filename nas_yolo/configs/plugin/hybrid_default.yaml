@@ -1,0 +1,9 @@
+# NASPlugin Hybrid (Edge profile - default)
+plugin:
+  profile: "edge"
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 8
+  in_channels: 3
+  ema_momentum: 0.9
