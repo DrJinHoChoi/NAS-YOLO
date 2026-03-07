@@ -190,7 +190,7 @@ class UltralyticsWithNASPlugin(nn.Module):
         intermediates = {}
         save_indices = set()
 
-        # Collect save indices from model config
+        # Collect save indices from model config (including Detect head references)
         for i, layer in enumerate(model):
             if hasattr(layer, 'f'):
                 f = layer.f
@@ -200,12 +200,24 @@ class UltralyticsWithNASPlugin(nn.Module):
                     for ff in f:
                         if isinstance(ff, int) and ff != -1:
                             save_indices.add(ff)
+            # Also save the layer index itself if any later layer references it
+            if hasattr(layer, 'i'):
+                save_indices.add(layer.i if isinstance(layer.i, int) else i)
+            else:
+                save_indices.add(i)
 
         neck_features = None
         for i, layer in enumerate(model):
             if i == self._detect_head_idx:
-                # Intercept: x should be the neck features (list)
-                if isinstance(x, (list, tuple)):
+                # The Detect head's 'f' attribute tells us which layers
+                # provide multi-scale features (e.g., f=[15, 18, 21])
+                detect_head = layer
+                if hasattr(detect_head, 'f') and isinstance(detect_head.f, (list, tuple)):
+                    neck_features = [
+                        intermediates[ff] if ff != -1 else x
+                        for ff in detect_head.f
+                    ]
+                elif isinstance(x, (list, tuple)):
                     neck_features = list(x)
                 else:
                     neck_features = [x]
@@ -247,7 +259,7 @@ class UltralyticsWithNASPlugin(nn.Module):
             neck_features, images=images
         )
 
-        # Run Detect head
+        # Run Detect head with enhanced features
         detect_head = model[self._detect_head_idx]
         outputs = detect_head(enhanced_features)
 
