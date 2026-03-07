@@ -248,10 +248,95 @@ def export_full_model(
     return output_path
 
 
+def export_pico(
+    num_classes: int = 30,
+    base_channels: int = 32,
+    output_path: str = "pico_yolo.onnx",
+    resolution: int = 320,
+    opset: int = 17,
+    quantize: bool = False,
+    use_context: bool = False,
+):
+    """Export complete PicoYOLO to ONNX with optional INT8 quantization.
+
+    Unlike export_full_model which wraps Ultralytics, this exports
+    the self-contained PicoYOLO model directly.
+
+    Target model sizes:
+        FP32: ~1.2MB (0.30M params × 4 bytes)
+        FP16: ~600KB
+        INT8: ~350KB
+    """
+    from nas_yolo.models.pico_yolo import PicoYOLO
+
+    model = PicoYOLO(
+        num_classes=num_classes,
+        base_channels=base_channels,
+        input_resolution=resolution,
+        use_context=use_context,
+    )
+    model.eval()
+
+    # Print model info
+    model.print_model_info()
+
+    # Ensure output directory
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    dummy = torch.randn(1, 3, resolution, resolution)
+
+    print(f"\nExporting PicoYOLO to ONNX...")
+    torch.onnx.export(
+        model,
+        (dummy,),
+        output_path,
+        opset_version=opset,
+        input_names=["images"],
+        output_names=["cls_preds", "reg_preds", "obj_preds"],
+        dynamic_axes={
+            "images": {0: "batch"},
+        },
+        do_constant_folding=True,
+    )
+
+    file_size = os.path.getsize(output_path) / 1024
+    print(f"  FP32 ONNX: {file_size:.0f} KB → {output_path}")
+
+    # Verify
+    try:
+        import onnx
+        onnx_model = onnx.load(output_path)
+        onnx.checker.check_model(onnx_model)
+        print(f"  ONNX verification: PASSED")
+    except ImportError:
+        print(f"  ONNX verification: skipped (pip install onnx)")
+    except Exception as e:
+        print(f"  ONNX verification: FAILED — {e}")
+
+    # INT8 quantization
+    if quantize:
+        int8_path = output_path.replace(".onnx", "_int8.onnx")
+        try:
+            from onnxruntime.quantization import quantize_dynamic, QuantType
+            quantize_dynamic(
+                output_path, int8_path,
+                weight_type=QuantType.QInt8,
+            )
+            int8_size = os.path.getsize(int8_path) / 1024
+            print(f"  INT8 ONNX: {int8_size:.0f} KB → {int8_path}")
+            print(f"  Compression: {file_size/int8_size:.1f}×")
+        except ImportError:
+            print("  INT8 quantization: skipped (pip install onnxruntime)")
+
+    return output_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="NAS-YOLO ONNX Export")
     parser.add_argument("--mode", type=str, default="plugin-only",
-                        choices=["plugin-only", "full"],
+                        choices=["plugin-only", "full", "pico"],
                         help="Export mode")
     parser.add_argument("--profile", type=str, default="ultra-lite",
                         choices=list(PROFILE_CONFIGS.keys()))
@@ -271,7 +356,17 @@ def main():
         else:
             args.output = f"smartglass_{args.num_classes}class_full.onnx"
 
-    if args.mode == "plugin-only":
+    if args.mode == "pico":
+        if args.output is None:
+            args.output = f"pico_yolo_{args.num_classes}class.onnx"
+        export_pico(
+            num_classes=args.num_classes,
+            output_path=args.output,
+            resolution=args.resolution,
+            opset=args.opset,
+            quantize=True,
+        )
+    elif args.mode == "plugin-only":
         export_plugin_only(
             profile=args.profile,
             output_path=args.output,

@@ -188,6 +188,11 @@ def load_config(path: str) -> dict:
 def build_plugin_model(config: dict, device: str, use_kd: bool = False):
     """Build YOLO + NASPlugin model from config.
 
+    Supports three model types:
+        - "pico_yolo": Self-contained PicoYOLO (~0.3M params)
+        - "ultralytics": UltralyticsWithNASPlugin wrapper
+        - "yolov9": YOLOv9WithNASPlugin wrapper
+
     Args:
         config: Full configuration dict.
         device: Device string ('cuda', 'cpu').
@@ -196,7 +201,28 @@ def build_plugin_model(config: dict, device: str, use_kd: bool = False):
     model_cfg = config.get("model", {})
     plugin_cfg = config.get("plugin", {})
     kd_cfg = config.get("kd", {})
-    framework = model_cfg.get("framework", "ultralytics")
+    model_type = model_cfg.get("type", "ultralytics")
+    framework = model_cfg.get("framework", model_type)
+
+    # PicoYOLO: self-contained sub-0.5M detection model
+    if model_type == "pico_yolo":
+        from nas_yolo.models.pico_yolo import PicoYOLO, build_pico_yolo
+        model = build_pico_yolo(config)
+
+        if use_kd and kd_cfg.get("enabled", False):
+            from nas_yolo.models.pico_kd import PicoKDWrapper
+            model._kd_wrapper = PicoKDWrapper(
+                student=model,
+                teacher_channels=model_cfg.get(
+                    "teacher_channels", [64, 128, 256]
+                ),
+                noise_dim=plugin_cfg.get("noise_dim", 32),
+                alpha_feature=kd_cfg.get("alpha_feature", 0.5),
+                alpha_output=kd_cfg.get("alpha_output", 0.5),
+                temperature=kd_cfg.get("temperature", 4.0),
+            )
+
+        return model.to(device)
 
     if framework == "yolov9":
         from nas_yolo.integrations import YOLOv9WithNASPlugin

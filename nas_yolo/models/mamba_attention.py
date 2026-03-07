@@ -15,12 +15,13 @@ validated in both audio (keyword spotting) and vision (object detection)
 domains, confirming that structural noise-robustness is a fundamental
 property of the SA-SSM architecture, not a domain-specific artifact.
 
-Supports 5 profiles for edge-to-cloud deployment:
+Supports 6 profiles for edge-to-cloud deployment:
   - Standard: MHSA 4 heads + expand=2 SSM (server)
   - Lite:     MHSA 2 heads + expand=1 SSM (desktop GPU)
   - Edge:     DWConv attention + expand=1 SSM (Jetson Orin) -- DEFAULT
   - Ultra-lite: SE-block + expand=1 d_state=4 SSM (Jetson Nano)
   - Tiny:     SE-block + expand=1 d_state=4 d_conv=2 SSM (Smart Glasses / XR2)
+  - Pico:     SE-block + expand=1 d_state=2 d_conv=1 SSM (IoT / sub-0.5M detection)
 
 References:
   - Gu & Dao, "Mamba: Linear-Time Sequence Modeling with Selective State Spaces", 2023
@@ -68,6 +69,12 @@ PROFILE_CONFIGS = {
         "num_heads": 1, "window_size": 0, "router_type": "fixed",
         "gate_min": 0.20, "learnable_floor": False, "weight_sharing": True,
         "d_conv": 2,
+    },
+    "pico": {
+        "expand": 1, "d_state": 2, "attention_type": "se",
+        "num_heads": 1, "window_size": 0, "router_type": "fixed",
+        "gate_min": 0.25, "learnable_floor": False, "weight_sharing": True,
+        "d_conv": 1,
     },
 }
 

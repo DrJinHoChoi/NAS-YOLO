@@ -8,6 +8,10 @@ from .nas_yolo import NASYOLO
 from .mamba_attention import MambaAttentionBlock, DWConvAttention, WindowMHSA, SEAttention, SA_SSM
 from .nas_plugin import NASPlugin
 from .shared_components import SharedNoiseRouter, SharedConfidenceRefiner
+from .pico_backbone import PicoBackbone, DepthwiseSeparableConv, InvertedResidual, SPPFLite
+from .pico_neck import PicoNeck
+from .pico_head import PicoDetectionHead, PicoDecoupledHead, ContextClassifier
+from .pico_yolo import PicoYOLO, build_pico_yolo
 from .structural_theory import StructuralNoiseDefenseAnalyzer, compute_structural_noise_bound
 from .knowledge_distillation import (
     FeatureDistillationLoss,
@@ -42,4 +46,14 @@ __all__ = [
     "FeatureDistillationLoss",
     "OutputDistillationLoss",
     "NoiseConditionedKDWrapper",
+    "PicoBackbone",
+    "DepthwiseSeparableConv",
+    "InvertedResidual",
+    "SPPFLite",
+    "PicoNeck",
+    "PicoDetectionHead",
+    "PicoDecoupledHead",
+    "ContextClassifier",
+    "PicoYOLO",
+    "build_pico_yolo",
 ]

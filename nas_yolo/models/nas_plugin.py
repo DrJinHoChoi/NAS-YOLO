@@ -26,6 +26,7 @@ Profiles (default: edge):
     - edge:       0.39M overhead (11%, Jetson Orin) ← DEFAULT
     - ultra-lite: 0.22M overhead (6%, Jetson Nano)
     - tiny:       ~0.15M overhead (4%, Smart Glasses / XR2)
+    - pico:       ~0.10M overhead (~3%, IoT / sub-0.5M PicoYOLO)
 """
 
 import torch

@@ -1,0 +1,60 @@
+# PicoYOLO — COCO 80-Class Comparison (vs PP-PicoDet-S, NanoDet-Plus)
+# For fair benchmark against SOTA ultra-lightweight detectors
+# Target: ~0.32M params, mAP ≥ 27% with noise robustness advantage
+
+model:
+  type: "pico_yolo"
+  base_channels: 32
+  num_classes: 80
+  input_resolution: 416              # Slightly larger for 80-class accuracy
+  expand_ratio: 2.0
+  channels_list: [64, 128, 128]
+
+plugin:
+  profile: "pico"
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 4
+  weight_sharing: true
+  gradient_checkpointing: false
+  use_parallel_scan: false
+  use_context: false                  # No context for fair comparison
+
+training:
+  stage1_epochs: 20
+  stage2_epochs: 280
+  batch_size: 96
+  base_lr: 0.02
+  weight_decay: 0.0005
+  warmup_epochs: 10
+  grad_accum_steps: 1
+  clip_grad_norm: 10.0
+  amp: true
+  ema: true
+  ema_decay: 0.9999
+  temporal_training: true
+  sequence_length: 5
+  tcl_weight: 0.5
+
+kd:
+  enabled: true
+  teacher_weights: "yolov8n.pt"
+  alpha_feature: 0.5
+  alpha_output: 0.5
+  temperature: 4.0
+
+augmentation:
+  corruption_aug: true
+  corruption_p: 0.3
+  mosaic: true
+  mixup: 0.1
+
+data:
+  train: "coco/train2017"
+  val: "coco/val2017"
+  img_size: 416
+
+output:
+  dir: "runs/pico_coco80"
+  save_every: 20

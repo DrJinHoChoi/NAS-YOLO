@@ -1,0 +1,73 @@
+# PicoYOLO — 30-Class Smart Glasses Detection (World's Smallest)
+# Target: ~0.30M params, <5ms ARM, <350KB INT8, <0.5W
+# 3.3× smaller than PP-PicoDet-S (0.99M)
+
+model:
+  type: "pico_yolo"
+  base_channels: 32
+  num_classes: 30
+  input_resolution: 320
+  expand_ratio: 2.0
+  channels_list: [64, 128, 128]    # PicoBackbone output
+
+plugin:
+  profile: "pico"                   # d_state=2, d_conv=1, SE, fixed router
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 4                      # Smaller pool for 320px input
+  weight_sharing: true
+  gradient_checkpointing: false
+  use_parallel_scan: false
+  use_context: true                 # Context-aware detection
+
+training:
+  stage1_epochs: 20                 # Longer warmup (training from scratch)
+  stage2_epochs: 280                # Total 300 epochs
+  batch_size: 128                   # Large batch OK for tiny model
+  base_lr: 0.02                     # Higher LR for scratch training
+  weight_decay: 0.0005
+  warmup_epochs: 10
+  grad_accum_steps: 1
+  clip_grad_norm: 10.0
+  amp: true
+  ema: true
+  ema_decay: 0.9999
+  temporal_training: true
+  sequence_length: 5
+  tcl_weight: 0.5
+
+kd:
+  enabled: true
+  teacher_weights: "yolov8n.pt"     # Knowledge distillation from YOLOv8n
+  alpha_feature: 0.5
+  alpha_output: 0.5
+  temperature: 4.0
+
+augmentation:
+  corruption_aug: true
+  corruption_p: 0.4
+  corruption_types:
+    - "gaussian_noise"
+    - "motion_blur"
+    - "low_light"
+    - "jpeg_compression"
+  mosaic: true
+  mixup: 0.15
+  random_resize: [256, 384]         # Multi-scale training
+
+data:
+  train: "coco/train2017"
+  val: "coco/val2017"
+  img_size: 320
+  class_subset: 30                  # Smart glasses 30-class subset
+
+deployment:
+  target_device: "Snapdragon XR2 Gen 2"
+  power_budget_watts: 0.5
+  latency_target_ms: 3
+  quantization: "int8"
+
+output:
+  dir: "runs/pico_30class"
+  save_every: 20
