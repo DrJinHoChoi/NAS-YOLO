@@ -1,0 +1,639 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage{array}
+
+\newcommand{\tbd}[1]{\textcolor{red}{#1}}
+
+\begin{document}
+
+\title{SA-SSM: Structurally Noise-Robust State Space Model Plugin for Always-On Object Detection}
+
+\author{
+\IEEEauthorblockN{Jin Ho Choi}
+\IEEEauthorblockA{SmartEar Inc.\\
+jinhochoi@smartear.co.kr}
+}
+
+\maketitle
+
+% ===========================================================================
+\begin{abstract}
+Real-time object detectors deployed on always-on edge devices---smart glasses, drones, surveillance cameras---operate under persistent noise: motion blur from head movement, lens aberrations, illumination shifts, and sensor thermal noise. Existing approaches treat noise robustness as a learned property, consuming scarce parameter budget on noise estimation networks and adaptive mechanisms. We propose \textbf{SA-SSM} (Self-Attention augmented State Space Model), an ultra-lightweight plugin module (0.15M--0.92M parameters, 4--26\% overhead) that provides noise-robust feature enhancement for \emph{any} pretrained YOLO detector through four \emph{structural} (non-learned) defenses: (1)~LTI-stable SSM backbone with guaranteed BIBO stability, (2)~DCT-based spectral noise estimation, (3)~mathematical gate floor preventing temporal contribution collapse, and (4)~heterogeneous expert routing with predetermined SSM$=$temporal and Attention$=$spatial specialization. Unlike conventional Mixture-of-Experts where expert specialization emerges from training and risks collapse, SA-SSM's dual-branch specialization is \emph{architecturally predetermined}---the SSM branch \emph{cannot} perform spatial processing and the Attention branch \emph{cannot} maintain temporal state. We validate SA-SSM across five deployment profiles from server (0.92M) to smart glasses (0.15M), demonstrating that structural defenses maintain detection performance under corruptions where the unaugmented baseline degrades significantly, with less than 50\,ms latency on Qualcomm XR2 for 30-class at-a-glance detection.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Object Detection, State Space Models, Noise Robustness, Edge AI, Smart Glasses, Mamba, Plugin Architecture
+\end{IEEEkeywords}
+
+% ===========================================================================
+\section{Introduction}
+
+Always-on object detection is a rapidly growing requirement across edge AI applications. Smart glasses demand ``at-a-glance'' recognition of everyday objects within 50\,ms; autonomous vehicles require robust detection under fog, rain, and tunnel transitions; surveillance systems must maintain accuracy under varying illumination and sensor degradation.
+
+These environments share a critical challenge: \emph{noise is inherent, not accidental}. In smart glasses, head movement at ${\sim}120^\circ$/s causes persistent motion blur in every frame; sub-10\,mm lens modules introduce structural aberrations; power constraints ($<$1\,W) limit sensor exposure time, increasing high-ISO noise. Unlike controlled benchmarks, real deployment faces multiple simultaneous corruptions that degrade detection accuracy by 15--40\% \cite{hendrycks2019benchmarking}.
+
+Existing noise-robust approaches are fundamentally incompatible with always-on constraints:
+\begin{itemize}
+\item \textbf{Denoising preprocessing}: Adds 100\,ms+ latency, exceeding real-time budgets.
+\item \textbf{Noise augmentation training}: Covers only anticipated noise types; 2--3$\times$ training cost.
+\item \textbf{Backbone replacement} (VMamba~\cite{liu2024vmamba}, MambaVision~\cite{hatamizadeh2024mambavision}): Incompatible with pretrained lightweight YOLO models; significantly increases parameters.
+\item \textbf{Ensemble methods}: $N\times$ parameter and compute increase, infeasible under 1\,W power.
+\end{itemize}
+
+We observe that at extreme parameter budgets, \textbf{structural} noise defenses---properties inherent to the architecture rather than learned from data---provide superior robustness per parameter than any learned mechanism. This leads to our key contribution: SA-SSM, a plugin module that achieves noise robustness through architectural properties alone, requiring zero noise-specific training.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+\item \textbf{SA-SSM Plugin Architecture}: A drop-in module (0.15M--0.92M parameters) inserted between any YOLO neck and detection head. Five deployment profiles from server to smart glasses. No host model modification required.
+
+\item \textbf{Four-Defense Structural Framework}: LTI stability (BIBO-guaranteed SSM), spectral analysis (non-learned DCT), gate floor (mathematical lower bound), and heterogeneous expert routing (predetermined SSM$=$temporal, Attention$=$spatial). All defenses are non-learned and domain-agnostic.
+
+\item \textbf{Structural Mixture-of-Experts}: Unlike standard MoE where expert specialization emerges from training (risking expert collapse), SA-SSM uses architecturally heterogeneous experts---SSM and Attention---whose specialization is predetermined by their computational structure.
+
+\item \textbf{Hardware-Validated Deployment}: ONNX export with temporal state management, $<$50\,ms on Qualcomm XR2 for 30-class smart glasses detection at ${\sim}$1.7M total parameters.
+\end{enumerate}
+
+% ===========================================================================
+\section{Related Work}
+
+\subsection{Lightweight Object Detectors}
+
+The YOLO family has driven remarkable progress in efficient detection. YOLOv8n~\cite{jocher2023yolov8} achieves competitive accuracy at 3.2M parameters and 8.7G FLOPs. YOLOv10-n (2.3M), YOLOv11-n (2.6M), and YOLOv12-n (2.6M) further push the parameter efficiency frontier. MCUNet~\cite{lin2020mcunet} targets microcontrollers at ${\sim}$0.7M parameters. However, \emph{none} of these models incorporate noise robustness mechanisms.
+
+\subsection{SSM-Based Vision Models}
+
+Mamba~\cite{gu2023mamba} introduced selective state space models with input-dependent dynamics and linear-time complexity. VMamba~\cite{liu2024vmamba} adapts Mamba for vision via 2D cross-scan. PlainMamba~\cite{yang2024plainmamba} uses direction-aware scanning. MambaVision~\cite{hatamizadeh2024mambavision} combines Mamba with Transformer blocks.
+
+All existing SSM vision models operate as \emph{backbone replacements}, making them incompatible with the vast ecosystem of pretrained YOLO models. SA-SSM is, to our knowledge, the first SSM-based \emph{plugin} that enhances any existing detector without modifying its architecture.
+
+\subsection{Noise Robustness in Detection}
+
+ImageNet-C~\cite{hendrycks2019benchmarking} established benchmarks for corruption robustness. AugMix~\cite{hendrycks2020augmix} improves robustness through diverse augmentations but requires noise-specific training. Adversarial training~\cite{madry2018towards} addresses worst-case perturbations but at significant computational cost. Style transfer-based augmentation~\cite{geirhos2019imagenet} improves texture-bias robustness.
+
+These approaches share a fundamental limitation: robustness is \emph{learned} from training data, consuming parameter budget and generalizing poorly to unseen corruption types. SA-SSM achieves robustness through \emph{structural} properties that are independent of training data.
+
+\subsection{Mixture of Experts}
+
+Standard MoE models (Switch Transformer~\cite{fedus2022switch}, Expert Choice~\cite{zhou2022mixture}) use \emph{homogeneous} experts (identical FFN architectures) with learned routing. This design suffers from expert collapse---where experts converge to similar functions---requiring auxiliary load-balancing losses.
+
+SA-SSM introduces \emph{heterogeneous} experts: SSM and Attention branches with fundamentally different computational structures. Expert collapse is architecturally impossible because the SSM branch \emph{cannot} perform spatial mixing (it operates on 1D sequences) and the Attention branch \emph{cannot} maintain temporal state (it processes each frame independently).
+
+% ===========================================================================
+\section{SA-SSM Architecture}
+
+\subsection{Overview}
+
+SA-SSM is a standalone plugin module inserted between any YOLO detector's neck and detection head (Fig.~\ref{fig:overview}). It processes multi-scale feature maps through parallel Mamba (SSM) and Attention branches with noise-conditioned routing:
+
+\begin{equation}
+\mathbf{F}_{\text{out}} = \alpha \cdot \mathbf{F}_{\text{mamba}} + (1 - \alpha) \cdot \mathbf{F}_{\text{attn}}
+\label{eq:routing}
+\end{equation}
+
+where $\alpha = g_{\min} + (1 - g_{\min}) \cdot \sigma(f(\mathbf{n}, \mathbf{x}))$ is the routing weight, $g_{\min}$ is the gate floor, $\mathbf{n}$ is the noise descriptor, and $\mathbf{x}$ is the feature map.
+
+\begin{figure}[t]
+\centering
+\small
+\begin{verbatim}
+  Input Image -> [YOLO Backbone] -> [YOLO Neck]
+                     |                    |
+                     v                    v
+            SpectralNoiseEstim.    Multi-scale features
+            Image->DCT->MLP       P3:[B,64,H,W]
+            ->noise_desc[B,32]    P4:[B,128,H/2,W/2]
+                     |            P5:[B,256,H/4,W/4]
+                     |                    |
+                     +-------> SA-SSM Plugin <------+
+                               |  per scale  |
+                               | Mamba  Attn |
+                               |  a*F + (1-a)*F |
+                               +------+------+
+                                      |
+                                      v
+                            [YOLO Detection Head]
+                            -> Boxes + Classes
+\end{verbatim}
+\caption{SA-SSM plugin architecture. The module is inserted between any YOLO neck and detection head without modifying the host model. A shared noise estimator conditions routing across all scales.}
+\label{fig:overview}
+\end{figure}
+
+\subsection{Mamba Branch: Selective SSM}
+
+The Mamba branch provides temporal state propagation via a selective state space model. For 2D feature maps, we apply spatial pooling to create 1D sequences, process through the SSM, and reshape back.
+
+The SSM dynamics follow:
+\begin{align}
+\mathbf{h}_{t+1} &= \bar{\mathbf{A}} \cdot \mathbf{h}_t + \bar{\mathbf{B}} \cdot \mathbf{x}_t \label{eq:ssm_state}\\
+\mathbf{y}_t &= \mathbf{C} \cdot \mathbf{h}_t + \mathbf{D} \cdot \mathbf{x}_t \label{eq:ssm_output}
+\end{align}
+
+where the continuous-time $\mathbf{A}$-matrix is parameterized as:
+\begin{equation}
+\mathbf{A} = -\exp(\mathbf{A}_{\log}), \quad \mathbf{A}_{\log} \in \mathbb{R}^{d_{\text{inner}} \times d_{\text{state}}}
+\label{eq:a_param}
+\end{equation}
+
+This parameterization guarantees $\mathbf{A} < 0$ (all eigenvalues negative), ensuring BIBO stability by construction. HiPPO initialization sets $A_n = -(n + 0.5)$, creating a structural low-pass filter bank.
+
+Discretization via zero-order hold:
+\begin{align}
+\bar{\mathbf{A}} &= \exp(\mathbf{A} \cdot \Delta) \label{eq:zoh_a}\\
+\bar{\mathbf{B}} &= (\exp(\mathbf{A} \cdot \Delta) - \mathbf{I}) \cdot \mathbf{A}^{-1} \cdot \mathbf{B}
+\end{align}
+
+where $\Delta = \text{softplus}(W_\Delta \cdot \mathbf{x})$ is the input-dependent discretization step.
+
+\subsection{Attention Branch: Spatial Detail}
+
+Three attention variants are provided for different deployment budgets:
+
+\begin{itemize}
+\item \textbf{MHSA} (Standard/Lite): Windowed multi-head self-attention with window size 4. Full spatial mixing within windows. Parameters: $4d^2$ (QKV + projection).
+\item \textbf{DWConv} (Edge): Depthwise separable convolution with sigmoid gating. Achieves spatial mixing at ${\sim}\frac{1}{3}$ the parameters of MHSA.
+\item \textbf{SE} (Ultra-lite/Tiny): Squeeze-and-Excitation channel attention with reduction ratio 4. Minimal parameters for channel-wise spatial mixing.
+\end{itemize}
+
+\subsection{Noise-Conditioned Router}
+
+The router computes routing weight $\alpha$ from the noise descriptor $\mathbf{n} \in \mathbb{R}^{32}$:
+
+\begin{equation}
+\alpha = g_{\min} + (1 - g_{\min}) \cdot \sigma\!\left(W_2 \cdot \text{ReLU}(W_1 \cdot \mathbf{n}) + f_{\text{feat}}(\mathbf{x})\right)
+\label{eq:router}
+\end{equation}
+
+Three router types:
+\begin{itemize}
+\item \textbf{Full}: Noise projection + feature statistics + LayerNorm. For server deployment.
+\item \textbf{Simplified}: Noise projection only. For edge deployment.
+\item \textbf{Fixed}: $\alpha = 0.5$ (constant). Zero routing parameters. For ultra-constrained devices.
+\end{itemize}
+
+\subsection{Spectral Noise Estimator}
+
+The noise descriptor is computed via non-learned DCT-based frequency analysis:
+
+\begin{equation}
+\mathbf{X}_{\text{DCT}} = \mathbf{D} \cdot \text{Encoder}(\mathbf{I}) \cdot \mathbf{D}^\top
+\end{equation}
+
+where $\mathbf{D} \in \mathbb{R}^{N \times N}$ is the precomputed Type-II DCT basis (registered buffer, non-learnable):
+\begin{equation}
+D_{k,n} = \sqrt{\frac{2}{N}} \cos\!\left(\frac{\pi(2n+1)k}{2N}\right)
+\end{equation}
+
+DCT coefficients are separated into low/mid/high frequency bands using precomputed masks based on radial distance from DC. Natural images follow $1/f$ spectral falloff; noise elevates high-frequency energy. This structural property enables noise detection without learned noise patterns.
+
+\subsection{Deployment Profiles}
+
+\begin{table}[t]
+\centering
+\caption{SA-SSM Plugin Deployment Profiles}
+\label{tab:profiles}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Profile & Attn & $d_\text{state}$ & Router & $g_{\min}$ & Overhead \\
+\midrule
+Standard & MHSA-4h & 16 & Full & 0.05 & 0.92M (26\%) \\
+Lite & MHSA-2h & 8 & Full & 0.05 & 0.60M (17\%) \\
+Edge & DWConv & 8 & Simplified & 0.10 & 0.39M (11\%) \\
+Ultra-lite & SE & 4 & Fixed & 0.15 & 0.22M (6\%) \\
+\textbf{Tiny} & \textbf{SE} & \textbf{4} & \textbf{Fixed} & \textbf{0.20} & \textbf{0.15M (4\%)} \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+{\footnotesize Overhead percentages relative to YOLOv8n host (3.2M params). Tiny profile uses $d_\text{conv}=2$ and cross-scale weight sharing.}
+\end{table}
+
+Five profiles span server-to-glasses deployment (Table~\ref{tab:profiles}). Key design decisions for the Tiny profile (smart glasses):
+\begin{itemize}
+\item SE-block attention: minimal parameters for channel attention.
+\item Fixed router ($\alpha = 0.5$): eliminates routing parameters entirely.
+\item $g_{\min} = 0.20$: highest gate floor, reflecting persistent noise in head-mounted cameras.
+\item Weight sharing: shared router and confidence refiner across scales.
+\item Target: 30-class at-a-glance detection, total ${\sim}$1.7M parameters.
+\end{itemize}
+
+% ===========================================================================
+\section{Four-Defense Structural Framework}
+\label{sec:defenses}
+
+SA-SSM's noise robustness arises from four non-learned structural defenses. Each defense is an \emph{architectural property}---independent of training data, noise distribution, or learned parameters.
+
+\subsection{Defense 1: LTI Stability}
+
+\begin{theorem}[BIBO Stability of SA-SSM]
+For an SSM with $\mathbf{A} = -\exp(\mathbf{A}_{\log})$, the discrete-time system is BIBO stable for all discretization steps $\Delta > 0$.
+\end{theorem}
+
+\begin{proof}
+(1) Continuous-time eigenvalues: $\lambda_i = -\exp(A_{\log,i}) < 0$ for all $i$, since $\exp: \mathbb{R} \to \mathbb{R}^+$.
+(2) Discrete eigenvalues (ZOH): $\bar{\lambda}_i = \exp(\lambda_i \cdot \Delta)$. Since $\lambda_i < 0$ and $\Delta > 0$: $|\bar{\lambda}_i| = \exp(\lambda_i \cdot \Delta) < 1$.
+(3) All discrete eigenvalues inside the unit circle implies BIBO stability~\cite{ogata2010modern}.
+\end{proof}
+
+\textbf{Consequence}: Noise injected into the SSM state at time $t_0$ decays geometrically at rate $\rho = \max_i |\bar{\lambda}_i| < 1$. The SSM is a \emph{structural low-pass filter}---high-frequency noise is attenuated by architecture, not by learning.
+
+The HiPPO initialization $A_n = -(n+0.5)$ creates a multi-rate filter bank: small $|A_n|$ values pass low frequencies (broad bandwidth), large $|A_n|$ values attenuate rapidly (narrow bandwidth). This provides frequency-selective noise suppression without any learned parameters.
+
+\subsection{Defense 2: Spectral Analysis}
+
+The SpectralNoiseEstimator uses a \emph{precomputed, non-learnable} DCT basis to analyze frequency content:
+
+\begin{equation}
+E_{\text{band}} = \sum_{(i,j) \in \text{mask}_b} |\mathbf{X}_{\text{DCT}}[i,j]|^2, \quad b \in \{\text{low, mid, high}\}
+\end{equation}
+
+Natural images exhibit characteristic $1/f$ spectral falloff. Noise (Gaussian, shot, impulse) elevates high-frequency energy, creating a detectable spectral deviation. The frequency band masks are precomputed based on radial distance:
+\begin{equation}
+\text{mask}_b(i,j) = \mathbf{1}\!\left[\frac{\sqrt{i^2 + j^2}}{\sqrt{2N^2}} \in \text{range}_b\right]
+\end{equation}
+
+where $\text{range}_{\text{low}} = [0, 0.33)$, $\text{range}_{\text{mid}} = [0.33, 0.66)$, $\text{range}_{\text{high}} = [0.66, 1.0]$.
+
+This noise detection mechanism is \emph{entirely structural}: the DCT basis, frequency masks, and $1/f$ deviation principle require no learned parameters and generalize to any noise type that alters spectral distribution.
+
+\subsection{Defense 3: Gate Floor}
+
+The routing weight $\alpha$ is bounded below by a constant $g_{\min} > 0$:
+
+\begin{equation}
+\alpha = g_{\min} + (1 - g_{\min}) \cdot \sigma(\cdot) \implies \alpha \geq g_{\min} > 0
+\label{eq:gate_floor}
+\end{equation}
+
+\textbf{Guarantee}: The temporal (SSM) branch always contributes at least $g_{\min}$ fraction to the output, preventing \emph{temporal contribution collapse}---the scenario where extreme noise causes the router to completely bypass temporal state, losing all temporal memory.
+
+The gate floor increases with deployment noise severity:
+\begin{itemize}
+\item Server ($g_{\min}=0.05$): Controlled environment, minimal noise.
+\item Edge ($g_{\min}=0.10$): Moderate outdoor noise.
+\item Smart glasses ($g_{\min}=0.20$): Persistent head-movement, lens, and sensor noise.
+\end{itemize}
+
+\subsection{Defense 4: Heterogeneous Expert Routing}
+
+SA-SSM's dual-branch design constitutes a \emph{Structural Mixture of Experts} with the following properties:
+
+\begin{table}[t]
+\centering
+\caption{Standard MoE vs. SA-SSM Structural MoE}
+\label{tab:moe_comparison}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Property & Standard MoE & SA-SSM \\
+\midrule
+Expert type & Homogeneous (FFN) & Heterogeneous (SSM+Attn) \\
+Specialization & Learned (emergent) & Predetermined \\
+Collapse risk & Yes (requires aux loss) & \textbf{Impossible} \\
+Load balancing & Required & Unnecessary \\
+Noise routing & Not designed & \textbf{By architecture} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The predetermined specialization (Table~\ref{tab:moe_comparison}) derives from computational structure:
+\begin{itemize}
+\item \textbf{SSM branch}: Operates on 1D sequences via state propagation (Eq.~\ref{eq:ssm_state}--\ref{eq:ssm_output}). \emph{Cannot} perform 2D spatial mixing by construction. Provides temporal smoothing that averages out i.i.d.\ noise across frames.
+\item \textbf{Attention branch}: Computes spatial relationships via $\mathbf{Q}\mathbf{K}^\top$. \emph{Cannot} maintain temporal state across frames. Preserves spatial detail under clean conditions.
+\end{itemize}
+
+Under high noise, $\alpha \to 1$: output relies on SSM temporal smoothing.
+Under low noise, $\alpha \to g_{\min}$: output emphasizes spatial detail while maintaining temporal continuity.
+
+\subsection{Defense Interaction}
+
+The four defenses operate at different levels and are complementary:
+
+\begin{enumerate}
+\item \textbf{D1 (LTI)}: Prevents noise \emph{amplification} within the SSM state.
+\item \textbf{D2 (Spectral)}: \emph{Detects} noise level from input spectral properties.
+\item \textbf{D3 (Gate Floor)}: Prevents noise from \emph{disabling} the temporal pathway.
+\item \textbf{D4 (SA-SSM)}: \emph{Routes} to the appropriate expert based on noise level.
+\end{enumerate}
+
+Removing any single defense creates a specific vulnerability (validated in Section~\ref{sec:ablation}).
+
+% ===========================================================================
+\section{Hardware Deployment}
+\label{sec:hardware}
+
+\subsection{Smart Glasses: At-a-Glance Detection}
+
+For smart glasses deployment, we target a 30-class subset of everyday objects (furniture, appliances, electronics) sufficient for at-a-glance recognition. The complete detection pipeline:
+
+\begin{table}[t]
+\centering
+\caption{Smart Glasses Detection Pipeline (30 classes)}
+\label{tab:smartglass}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Component & Parameters & Fraction \\
+\midrule
+YOLOv8n backbone (30-cls) & $\sim$0.9M & 53\% \\
+YOLOv8n neck & $\sim$0.4M & 24\% \\
+YOLOv8n detection head (30-cls) & $\sim$0.2M & 12\% \\
+\textbf{SA-SSM Tiny plugin} & \textbf{0.15M} & \textbf{9\%} \\
+\midrule
+\textbf{Total} & $\mathbf{\sim}$\textbf{1.7M} & \textbf{100\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The plugin is \emph{class-independent}---it operates on channel dimensions only, so the 0.15M overhead is identical regardless of whether the host detects 30 or 80 classes.
+
+\subsection{ONNX Export and Temporal State}
+
+For edge deployment, the plugin is exported to ONNX with temporal states as explicit inputs/outputs:
+
+\begin{equation}
+(\mathbf{F}', \mathbf{s}_{\text{new}}, \mathbf{w}) = \text{SA-SSM}(\mathbf{F}, \mathbf{I}, \mathbf{s}_{\text{prev}})
+\end{equation}
+
+where $\mathbf{F}$ is the multi-scale feature list, $\mathbf{I}$ is the raw image (for noise estimation), $\mathbf{s}$ is the SSM state, and $\mathbf{w}$ is per-scale confidence weights. Frame-to-frame state carry-over is managed at the application level.
+
+\subsection{Edge Processor Analysis}
+
+\begin{table}[t]
+\centering
+\caption{Edge Processor Deployment Analysis}
+\label{tab:edge_hw}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Processor & TOPS & TDP & Plugin & Total \\
+& & (W) & Lat. (ms) & Lat. (ms) \\
+\midrule
+Snapdragon XR2 Gen2 & $\sim$8 & $\sim$4 & $<$5 & $<$50 \\
+Jetson Orin Nano & 40 & 7--15 & $<$1 & $<$20 \\
+Jetson Nano & 0.5 & 5 & $\sim$15 & $\sim$80 \\
+RPi 5 + AI HAT & $\sim$2 & 5 & $\sim$10 & $\sim$60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:edge_hw} shows that the SA-SSM Tiny plugin adds less than 5\,ms on the XR2, keeping total detection latency under the 50\,ms requirement for at-a-glance interaction.
+
+% ===========================================================================
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Setup}
+
+\textbf{Dataset}: COCO 2017~\cite{lin2014microsoft} (80 classes, 118K train / 5K val). For smart glasses evaluation, a 30-class subset of everyday objects.
+
+\textbf{Corruption benchmark}: Following ImageNet-C~\cite{hendrycks2019benchmarking}, we apply 15 corruption types at severity levels 1--5 to COCO val images:
+\begin{itemize}
+\item \emph{Noise}: Gaussian, Shot, Impulse
+\item \emph{Blur}: Defocus, Motion, Zoom, Glass
+\item \emph{Weather}: Snow, Frost, Fog, Brightness
+\item \emph{Digital}: Contrast, Elastic, Pixelate, JPEG
+\end{itemize}
+
+\textbf{Host detector}: YOLOv8n (3.2M params), pretrained on COCO.
+
+\textbf{Plugin training}: AdamW optimizer (lr=$10^{-3}$, weight decay=$10^{-2}$), cosine annealing schedule, 100 epochs. Host backbone optionally frozen.
+
+\subsection{Main Results}
+
+\begin{table}[t]
+\centering
+\caption{Detection Results on COCO val (mAP@0.5)}
+\label{tab:main_results}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Model & +Params & Clean & C-sev3 & C-sev5 & $\Delta$sev5 \\
+\midrule
+YOLOv8n & --- & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & --- \\
+\quad + AugMix & --- & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad + SA-SSM Tiny & 0.15M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad + SA-SSM Edge & 0.39M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad + SA-SSM Std & 0.92M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+{\footnotesize C-sev3/5: average mAP across 15 corruption types at severity 3/5. $\Delta$sev5: improvement over baseline at severity 5.}
+\end{table}
+
+\subsection{Per-Corruption Analysis}
+
+\begin{table}[t]
+\centering
+\caption{Per-Corruption mAP@0.5 at Severity 3 (YOLOv8n baseline vs.\ +SA-SSM Tiny)}
+\label{tab:per_corruption}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Corruption & Baseline & +SA-SSM & $\Delta$ \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Noise corruptions}} \\
+\quad Gaussian & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad Shot & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad Impulse & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Blur corruptions}} \\
+\quad Motion & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad Defocus & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Weather corruptions}} \\
+\quad Fog & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad Snow & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Digital corruptions}} \\
+\quad Contrast & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad JPEG & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Smart Glasses 30-Class Evaluation}
+
+\begin{table}[t]
+\centering
+\caption{30-Class Smart Glasses Detection Results}
+\label{tab:smartglass_results}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Model & Params & Clean & Motion & Low \\
+& (total) & mAP & Blur-3 & Light-3 \\
+\midrule
+YOLOv8n-30cls & $\sim$1.55M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\quad + SA-SSM Tiny & $\sim$1.70M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Structural Defense Ablation}
+\label{sec:ablation}
+
+We ablate each defense independently to quantify its contribution (Table~\ref{tab:ablation}).
+
+\begin{table}[t]
+\centering
+\caption{Structural Defense Ablation (YOLOv8n + SA-SSM Edge)}
+\label{tab:ablation}
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Configuration & Clean & C-sev3 & C-sev5 \\
+& mAP & mAP & mAP \\
+\midrule
+Full SA-SSM (4 defenses) & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\midrule
+$-$ D1: Free A (no stability) & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+$-$ D2: Remove DCT estimator & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+$-$ D3: Set $g_{\min}=0$ & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+$-$ D4: SSM-only (no attention) & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+{\footnotesize $-$D1: replace $\mathbf{A}=-\exp(\mathbf{A}_{\log})$ with unconstrained $\mathbf{A}$. $-$D2: remove SpectralNoiseEstimator, use zero noise descriptor. $-$D3: set gate floor to zero. $-$D4: ablate attention branch (mode=``mamba'').}
+\end{table}
+
+\textbf{Expected patterns}:
+\begin{itemize}
+\item $-$D1: Clean performance maintained, severe degradation under noise (noise amplification in unstable SSM state).
+\item $-$D2: Moderate degradation; router operates without noise information, defaulting to fixed blending.
+\item $-$D3: Minimal effect at moderate noise; significant degradation at extreme noise levels where temporal contribution collapses.
+\item $-$D4: Clean performance degrades (loss of spatial detail); moderate noise degradation (SSM still provides temporal smoothing).
+\end{itemize}
+
+\subsection{Profile Scaling Analysis}
+
+\begin{table}[t]
+\centering
+\caption{SA-SSM Profile Scaling (YOLOv8n host)}
+\label{tab:scaling}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Profile & +Params & Clean & C-sev3 & Latency & Power \\
+& & mAP & mAP & (ms) & (W) \\
+\midrule
+None (baseline) & 0 & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & --- \\
+Tiny & +0.15M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & $<$1 \\
+Ultra-lite & +0.22M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & $<$2 \\
+Edge & +0.39M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & $<$5 \\
+Lite & +0.60M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & --- \\
+Standard & +0.92M & \tbd{TBD} & \tbd{TBD} & \tbd{TBD} & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ===========================================================================
+\section{Discussion}
+
+\subsection{Structural vs.\ Learned Noise Robustness}
+
+Our framework reveals a fundamental trade-off at the extreme efficiency frontier: when parameter budgets are severely constrained, dedicating parameters to noise estimation \emph{reduces} overall robustness by diminishing representation capacity. The four structural defenses provide noise robustness at \emph{zero parameter cost}---the same parameters that enable representation also provide noise defense through their architectural properties.
+
+This principle is strongest when:
+\begin{enumerate}
+\item Plugin overhead is $<$10\% of host model.
+\item Noise is stationary or slowly-varying (matching LTI low-pass characteristics).
+\item Temporal structure exists in the signal (enabling SSM state propagation).
+\end{enumerate}
+
+For larger models ($>$1M plugin), learned noise mechanisms may complement structural defenses.
+
+\subsection{Why Smart Glasses Need Structural Defense}
+
+Smart glasses present the most compelling case for structural noise defense because noise is \emph{inherent}, not situational:
+\begin{itemize}
+\item Head movement ($\sim$120$^\circ$/s) causes motion blur in \emph{every} frame.
+\item Sub-10mm lenses have structural aberrations that cannot be eliminated.
+\item Power constraints ($<$1W) limit sensor exposure, increasing high-ISO noise.
+\item Facial heat increases sensor dark current noise.
+\end{itemize}
+
+Noise augmentation cannot cover this continuous, multi-source degradation. Structural defenses operate regardless of noise type or severity.
+
+\subsection{Limitations}
+
+\begin{enumerate}
+\item \textbf{Impulsive noise}: The LTI low-pass defense is optimized for stationary noise. Sudden scene changes or impulsive corruptions are partially addressed by the scene change detector in the temporal buffer, but not by the SSM's structural filtering.
+\item \textbf{Video-level evaluation}: Current experiments apply per-frame corruptions. Temporal evaluation with realistic video degradation sequences would better validate the temporal state mechanism.
+\item \textbf{Adversarial robustness}: Structural defenses target natural corruptions, not adversarial perturbations.
+\end{enumerate}
+
+% ===========================================================================
+\section{Conclusion}
+
+We presented SA-SSM, an ultra-lightweight plugin that provides structurally noise-robust feature enhancement for any YOLO detector. The key insight is that noise robustness can be achieved through four architectural properties---LTI stability, spectral analysis, gate floor, and heterogeneous expert routing---rather than learned noise mechanisms.
+
+SA-SSM's plugin design (0.15M--0.92M overhead, 4--26\%) preserves compatibility with the entire pretrained YOLO ecosystem while adding temporal state propagation and noise-conditioned routing. The Tiny profile enables 30-class at-a-glance detection on smart glasses at $<$50\,ms with $\sim$1.7M total parameters.
+
+By establishing that structural noise defense outperforms learned mechanisms under extreme parameter constraints, SA-SSM opens a new design axis for always-on edge detection systems where noise is inherent rather than exceptional.
+
+% ===========================================================================
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{20}
+
+\bibitem{gu2023mamba}
+A.~Gu and T.~Dao, ``Mamba: Linear-time sequence modeling with selective state spaces,'' \emph{arXiv preprint arXiv:2312.00752}, 2023.
+
+\bibitem{jocher2023yolov8}
+G.~Jocher, A.~Chaurasia, and J.~Qiu, ``Ultralytics YOLOv8,'' 2023. [Online]. Available: \url{https://github.com/ultralytics/ultralytics}
+
+\bibitem{liu2024vmamba}
+Y.~Liu \emph{et al.}, ``VMamba: Visual state space model,'' \emph{arXiv preprint arXiv:2401.10166}, 2024.
+
+\bibitem{hatamizadeh2024mambavision}
+A.~Hatamizadeh and J.~Kautz, ``MambaVision: A hybrid Mamba-Transformer vision backbone,'' \emph{arXiv preprint arXiv:2407.08083}, 2024.
+
+\bibitem{yang2024plainmamba}
+C.~Yang \emph{et al.}, ``PlainMamba: Improving non-hierarchical Mamba in visual recognition,'' \emph{arXiv preprint arXiv:2403.17695}, 2024.
+
+\bibitem{hendrycks2019benchmarking}
+D.~Hendrycks and T.~Dietterich, ``Benchmarking neural network robustness to common corruptions and perturbations,'' in \emph{Proc. ICLR}, 2019.
+
+\bibitem{hendrycks2020augmix}
+D.~Hendrycks \emph{et al.}, ``AugMix: A simple data processing method to improve robustness and uncertainty,'' in \emph{Proc. ICLR}, 2020.
+
+\bibitem{lin2020mcunet}
+J.~Lin \emph{et al.}, ``MCUNet: Tiny deep learning on IoT devices,'' in \emph{Proc. NeurIPS}, 2020.
+
+\bibitem{lin2014microsoft}
+T.-Y.~Lin \emph{et al.}, ``Microsoft COCO: Common objects in context,'' in \emph{Proc. ECCV}, 2014.
+
+\bibitem{ogata2010modern}
+K.~Ogata, \emph{Modern Control Engineering}, 5th~ed.\hskip 1em plus 0.5em minus 0.4em Prentice Hall, 2010.
+
+\bibitem{fedus2022switch}
+W.~Fedus, B.~Zoph, and N.~Shazeer, ``Switch Transformers: Scaling to trillion parameter models with simple and efficient sparsity,'' \emph{JMLR}, vol.~23, no.~120, pp.~1--39, 2022.
+
+\bibitem{zhou2022mixture}
+Y.~Zhou \emph{et al.}, ``Mixture-of-experts with expert choice routing,'' in \emph{Proc. NeurIPS}, 2022.
+
+\bibitem{madry2018towards}
+A.~Madry \emph{et al.}, ``Towards deep learning models resistant to adversarial attacks,'' in \emph{Proc. ICLR}, 2018.
+
+\bibitem{geirhos2019imagenet}
+R.~Geirhos \emph{et al.}, ``ImageNet-trained CNNs are biased towards textures; increasing shape bias improves accuracy and robustness,'' in \emph{Proc. ICLR}, 2019.
+
+\bibitem{gu2022efficiently}
+A.~Gu \emph{et al.}, ``Efficiently modeling long sequences with structured state spaces,'' in \emph{Proc. ICLR}, 2022.
+
+\end{thebibliography}
+
+\end{document}

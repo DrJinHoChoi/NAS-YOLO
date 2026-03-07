@@ -1,0 +1,21 @@
+# NASPlugin Hybrid (Edge) + Knowledge Distillation
+# Combines noise-conditioned KD with weight-sharing-enabled plugin
+plugin:
+  profile: "edge"
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 8
+  in_channels: 3
+  ema_momentum: 0.9
+  weight_sharing: true    # Enable cross-scale weight sharing
+
+kd:
+  enabled: true
+  teacher_weights: "yolov8n.pt"     # Teacher: standard CNN YOLO (frozen)
+  alpha_feature: 1.0                # Feature-level KD weight
+  alpha_output: 1.0                 # Output-level KD weight
+  temperature: 4.0                  # Softmax temperature for output KD
+  feature_loss_type: "combined"     # 'l2', 'cosine', or 'combined'
+  noise_conditioned: true           # Enable noise-conditioned reliability
+  kd_weight: 1.0                    # Global KD loss weight multiplier

@@ -1,0 +1,45 @@
+# SA-SSM Plugin — Colab Smoke Test (COCO128, 2 epochs)
+# 5분 이내 동작 확인용. GPU 메모리 ~4GB.
+
+model:
+  yolo_variant: "yolov8n"
+  pretrained_weights: "yolov8n.pt"
+  framework: "ultralytics"
+  num_classes: 80
+  channels_list: [64, 128, 256]
+
+plugin:
+  profile: "edge"
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 8
+  gradient_checkpointing: false
+  use_parallel_scan: false
+
+training:
+  stage1_epochs: 1
+  stage2_epochs: 1
+  batch_size: 8
+  base_lr: 0.001
+  weight_decay: 0.0005
+  warmup_epochs: 0
+  grad_accum_steps: 1
+  clip_grad_norm: 10.0
+  amp: true
+  ema: false
+  temporal_training: false
+
+augmentation:
+  corruption_aug: false
+  mosaic: false
+  mixup: 0.0
+
+data:
+  train: "coco128/images/train2017"
+  val: "coco128/images/train2017"
+  train_ann: "coco128/labels/train2017"
+  img_size: 640
+
+output:
+  dir: "runs/smoke_test"

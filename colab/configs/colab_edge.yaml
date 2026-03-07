@@ -1,0 +1,49 @@
+# SA-SSM Plugin — Edge Profile Training (COCO 2017, 100 epochs)
+# T4: batch_size=16, A100: batch_size=32
+
+model:
+  yolo_variant: "yolov8n"
+  pretrained_weights: "yolov8n.pt"
+  framework: "ultralytics"
+  num_classes: 80
+  channels_list: [64, 128, 256]
+
+plugin:
+  profile: "edge"
+  mode: "hybrid"
+  use_noise_gate: true
+  noise_dim: 32
+  pool_size: 8
+  gradient_checkpointing: true   # T4 GPU memory optimization
+  use_parallel_scan: false
+
+training:
+  stage1_epochs: 15              # Freeze backbone+neck, train plugin only
+  stage2_epochs: 85              # Unfreeze all, fine-tune
+  batch_size: 16                 # T4: 16, A100: 32
+  base_lr: 0.01
+  weight_decay: 0.0005
+  warmup_epochs: 3
+  grad_accum_steps: 2            # Effective batch = 16 x 2 = 32
+  clip_grad_norm: 10.0
+  amp: true
+  ema: true
+  ema_decay: 0.9999
+  temporal_training: true
+  sequence_length: 5
+  tcl_weight: 0.5
+
+augmentation:
+  corruption_aug: true
+  corruption_p: 0.3
+  mosaic: true
+  mixup: 0.1
+
+data:
+  train: "coco/train2017"
+  val: "coco/val2017"
+  img_size: 640
+
+output:
+  dir: "runs/yolov8n_edge"
+  save_every: 10                 # Checkpoint every 10 epochs

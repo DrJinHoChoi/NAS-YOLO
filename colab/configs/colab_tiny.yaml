@@ -1,4 +1,6 @@
-# YOLOv8-n + NASPlugin
+# SA-SSM Plugin — Tiny Profile Training (Smart Glasses, COCO 2017)
+# Smallest plugin: ~0.15M overhead (4%), gate_min=0.20
+
 model:
   yolo_variant: "yolov8n"
   pretrained_weights: "yolov8n.pt"
@@ -7,26 +9,26 @@ model:
   channels_list: [64, 128, 256]
 
 plugin:
-  profile: "edge"
+  profile: "tiny"                # SE attention, d_state=4, d_conv=2
   mode: "hybrid"
   use_noise_gate: true
   noise_dim: 32
   pool_size: 8
-  gradient_checkpointing: false  # Enable for memory-constrained GPUs (~30% less VRAM)
-  use_parallel_scan: false       # Enable for faster training (~3-5x SSM speedup)
+  gradient_checkpointing: true
+  use_parallel_scan: false
 
 training:
   stage1_epochs: 15
   stage2_epochs: 85
-  batch_size: 32
+  batch_size: 16
   base_lr: 0.01
   weight_decay: 0.0005
   warmup_epochs: 3
-  grad_accum_steps: 1            # Effective batch = batch_size × grad_accum_steps
-  clip_grad_norm: 10.0           # Max gradient norm (0 = no clipping)
+  grad_accum_steps: 2
+  clip_grad_norm: 10.0
   amp: true
-  ema: true                      # Exponential Moving Average of weights
-  ema_decay: 0.9999              # EMA decay factor
+  ema: true
+  ema_decay: 0.9999
   temporal_training: true
   sequence_length: 5
   tcl_weight: 0.5
@@ -43,4 +45,5 @@ data:
   img_size: 640
 
 output:
-  dir: "runs/yolov8n_hybrid"
+  dir: "runs/yolov8n_tiny"
+  save_every: 10

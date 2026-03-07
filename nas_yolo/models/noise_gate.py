@@ -211,9 +211,19 @@ class NoiseAwareGate(nn.Module):
         reduction: Channel reduction ratio for efficiency.
     """
 
-    def __init__(self, channels: int, noise_dim: int = 32, reduction: int = 4):
+    def __init__(self, channels: int, noise_dim: int = 32, reduction: int = 4,
+                 gate_min: float = 0.05, learnable_floor: bool = False):
         super().__init__()
         self.channels = channels
+        self.learnable_floor = learnable_floor
+
+        # Gate floor: ensures gate >= gate_min (prevents total signal blockage)
+        if learnable_floor and gate_min > 0:
+            init_raw = math.log(gate_min / (1.0 - gate_min + 1e-8))
+            self._gate_min_raw = nn.Parameter(torch.tensor(init_raw))
+            self.max_floor = 0.20  # Hard cap to prevent floor dominating
+        else:
+            self.register_buffer("_gate_min_fixed", torch.tensor(float(gate_min)))
 
         # Noise condition projection
         self.noise_proj = nn.Sequential(
@@ -264,7 +274,14 @@ class NoiseAwareGate(nn.Module):
 
         # Combine: noise condition modulates feature-based gate
         combined = self.gate_norm(noise_gate + feat_gate)  # [B, C]
-        gate = torch.sigmoid(combined)  # [B, C]
+
+        # Apply gate floor: gate = gate_min + (1 - gate_min) * sigmoid(combined)
+        # This ensures gate >= gate_min, preventing total signal blockage at extreme noise
+        if self.learnable_floor and hasattr(self, '_gate_min_raw'):
+            gate_min = torch.sigmoid(self._gate_min_raw).clamp(max=self.max_floor)
+        else:
+            gate_min = self._gate_min_fixed
+        gate = gate_min + (1.0 - gate_min) * torch.sigmoid(combined)  # [B, C]
 
         # Reshape for broadcasting: [B, C] → [B, C, 1, 1]
         gate = gate.unsqueeze(-1).unsqueeze(-1)

@@ -16,6 +16,14 @@ Usage:
 Two-stage training:
     Stage 1: freeze_backbone=True  → train only NASPlugin (15 epochs)
     Stage 2: freeze_backbone=False → fine-tune everything (85 epochs)
+
+Knowledge Distillation:
+    model = UltralyticsWithKD(
+        weights_path="yolov8n.pt",
+        teacher_weights="yolov8n.pt",
+        plugin_cfg={"profile": "edge", "mode": "hybrid"},
+    )
+    outputs = model(images)  # includes kd_loss in outputs
 """
 
 import torch
@@ -23,6 +31,7 @@ import torch.nn as nn
 from typing import Optional, Dict, List, Tuple
 
 from ..models.nas_plugin import NASPlugin
+from ..models.knowledge_distillation import NoiseConditionedKDWrapper
 
 
 class UltralyticsWithNASPlugin(nn.Module):
@@ -264,3 +273,298 @@ class UltralyticsWithNASPlugin(nn.Module):
             "overhead_pct": plugin_info["total_params"] / base_params * 100,
             "plugin_detail": plugin_info,
         }
+
+
+class UltralyticsWithKD(UltralyticsWithNASPlugin):
+    """Ultralytics YOLO + NASPlugin with Knowledge Distillation.
+
+    Extends UltralyticsWithNASPlugin to include a frozen teacher model
+    and noise-conditioned KD loss computation during training.
+
+    The teacher is a standard CNN YOLO (without NASPlugin) that provides:
+      - Feature-level supervision: neck features guide NASPlugin output
+      - Output-level supervision: detection logits soft-label guidance
+      - Noise-conditioned weighting: KD weight reduces under noisy inputs
+
+    Args:
+        weights_path: Student model weights (YOLO + NASPlugin).
+        teacher_weights: Teacher model weights (standard YOLO, frozen).
+        plugin_cfg: NASPlugin configuration dict.
+        kd_cfg: Knowledge distillation configuration dict.
+        freeze_backbone: Whether to freeze student's backbone+neck.
+        num_classes: Number of classes.
+    """
+
+    def __init__(
+        self,
+        weights_path: str = "yolov8n.pt",
+        teacher_weights: Optional[str] = None,
+        plugin_cfg: Optional[Dict] = None,
+        kd_cfg: Optional[Dict] = None,
+        freeze_backbone: bool = True,
+        num_classes: Optional[int] = None,
+    ):
+        super().__init__(
+            weights_path=weights_path,
+            plugin_cfg=plugin_cfg,
+            freeze_backbone=freeze_backbone,
+            num_classes=num_classes,
+        )
+
+        kd_cfg = kd_cfg or {}
+        teacher_weights = teacher_weights or weights_path
+
+        # Load teacher model (frozen, eval-only)
+        self._load_teacher(teacher_weights)
+
+        # KD loss module
+        noise_dim = (plugin_cfg or {}).get("noise_dim", 32)
+        self.kd_wrapper = NoiseConditionedKDWrapper(
+            noise_dim=noise_dim,
+            feature_loss_type=kd_cfg.get("feature_loss_type", "combined"),
+            temperature=kd_cfg.get("temperature", 4.0),
+            alpha_feature=kd_cfg.get("alpha_feature", 1.0),
+            alpha_output=kd_cfg.get("alpha_output", 1.0),
+        )
+
+        self._kd_weight = kd_cfg.get("kd_weight", 1.0)
+
+    def _load_teacher(self, teacher_weights: str):
+        """Load and freeze the teacher CNN model."""
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise ImportError(
+                "ultralytics package required. Install with: pip install ultralytics"
+            )
+
+        teacher_yolo = YOLO(teacher_weights)
+        self.teacher_model = teacher_yolo.model
+
+        # Freeze teacher completely
+        for param in self.teacher_model.parameters():
+            param.requires_grad = False
+        self.teacher_model.eval()
+
+        # Find teacher's detect head index
+        self._teacher_head_idx = None
+        for i in range(len(self.teacher_model.model) - 1, -1, -1):
+            layer_name = type(self.teacher_model.model[i]).__name__
+            if "Detect" in layer_name or "Segment" in layer_name:
+                self._teacher_head_idx = i
+                break
+
+    @torch.no_grad()
+    def _teacher_forward(
+        self, images: torch.Tensor
+    ) -> Tuple[List[torch.Tensor], Dict[str, List[torch.Tensor]]]:
+        """Run teacher forward pass to extract features and outputs.
+
+        Args:
+            images: Input images [B, 3, H, W].
+
+        Returns:
+            teacher_features: Neck feature maps (before detect head).
+            teacher_outputs: Detection outputs dict with cls_preds, obj_preds.
+        """
+        self.teacher_model.eval()
+        model = self.teacher_model.model
+
+        x = images
+        intermediates = {}
+        save_indices = set()
+
+        for i, layer in enumerate(model):
+            if hasattr(layer, 'f'):
+                f = layer.f
+                if isinstance(f, int) and f != -1:
+                    save_indices.add(f)
+                elif isinstance(f, (list, tuple)):
+                    for ff in f:
+                        if isinstance(ff, int) and ff != -1:
+                            save_indices.add(ff)
+
+        neck_features = None
+        for i, layer in enumerate(model):
+            if i == self._teacher_head_idx:
+                if isinstance(x, (list, tuple)):
+                    neck_features = list(x)
+                else:
+                    neck_features = [x]
+                break
+
+            if hasattr(layer, 'f'):
+                f = layer.f
+                if isinstance(f, int):
+                    if f == -1:
+                        layer_input = x
+                    else:
+                        layer_input = intermediates[f]
+                elif isinstance(f, (list, tuple)):
+                    layer_input = [
+                        intermediates[ff] if ff != -1 else x
+                        for ff in f
+                    ]
+                else:
+                    layer_input = x
+            else:
+                layer_input = x
+
+            if isinstance(layer_input, list):
+                x = layer(layer_input)
+            else:
+                x = layer(layer_input)
+
+            if i in save_indices:
+                intermediates[i] = x
+
+        # Extract detection outputs from teacher head
+        teacher_outputs = {}
+        if neck_features is not None and self._teacher_head_idx is not None:
+            detect_head = model[self._teacher_head_idx]
+            try:
+                head_out = detect_head(neck_features)
+                # Try to extract cls/obj predictions from head output
+                if isinstance(head_out, (list, tuple)):
+                    teacher_outputs["features"] = list(head_out)
+            except Exception:
+                pass
+
+        return neck_features or [], teacher_outputs
+
+    def forward(
+        self,
+        images: torch.Tensor,
+        targets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """Forward pass with NASPlugin and KD loss computation.
+
+        During training, computes both detection loss and KD loss.
+        During inference, behaves like the parent class (no KD overhead).
+
+        Args:
+            images: Input images [B, 3, H, W].
+            targets: Optional ground truth for loss computation.
+
+        Returns:
+            outputs: Detection outputs dict, with 'kd_losses' during training.
+        """
+        model = self.ultralytics_model.model
+
+        # Run backbone + neck (student)
+        x = images
+        intermediates = {}
+        save_indices = set()
+
+        for i, layer in enumerate(model):
+            if hasattr(layer, 'f'):
+                f = layer.f
+                if isinstance(f, int) and f != -1:
+                    save_indices.add(f)
+                elif isinstance(f, (list, tuple)):
+                    for ff in f:
+                        if isinstance(ff, int) and ff != -1:
+                            save_indices.add(ff)
+
+        neck_features = None
+        for i, layer in enumerate(model):
+            if i == self._detect_head_idx:
+                if isinstance(x, (list, tuple)):
+                    neck_features = list(x)
+                else:
+                    neck_features = [x]
+                break
+
+            if hasattr(layer, 'f'):
+                f = layer.f
+                if isinstance(f, int):
+                    if f == -1:
+                        layer_input = x
+                    else:
+                        layer_input = intermediates[f]
+                elif isinstance(f, (list, tuple)):
+                    layer_input = [
+                        intermediates[ff] if ff != -1 else x
+                        for ff in f
+                    ]
+                else:
+                    layer_input = x
+            else:
+                layer_input = x
+
+            if isinstance(layer_input, list):
+                x = layer(layer_input)
+            else:
+                x = layer(layer_input)
+
+            if i in save_indices:
+                intermediates[i] = x
+
+        if neck_features is None:
+            raise RuntimeError("Failed to extract neck features")
+
+        # Apply NASPlugin (student)
+        enhanced_features, _, conf_weights = self.nas_plugin(
+            neck_features, images=images
+        )
+
+        # Run Detect head (student)
+        detect_head = model[self._detect_head_idx]
+        outputs = detect_head(enhanced_features)
+
+        # KD loss computation (training only)
+        if self.training:
+            # Get noise level from plugin's noise estimator
+            noise_level = None
+            if self.nas_plugin.noise_estimator is not None:
+                with torch.no_grad():
+                    noise_level = self.nas_plugin.noise_estimator(images)
+
+            # Teacher forward (always no_grad)
+            teacher_features, teacher_outputs = self._teacher_forward(images)
+
+            # Compute KD loss
+            # Feature-level: student enhanced_features vs teacher neck_features
+            student_kd_features = enhanced_features
+            teacher_kd_features = teacher_features
+
+            # Ensure feature count matches (use min of both)
+            n_scales = min(len(student_kd_features), len(teacher_kd_features))
+            student_kd_features = student_kd_features[:n_scales]
+            teacher_kd_features = teacher_kd_features[:n_scales]
+
+            kd_result = self.kd_wrapper(
+                student_features=student_kd_features,
+                teacher_features=teacher_kd_features,
+                student_outputs=None,  # Output-level KD requires matching head format
+                teacher_outputs=None,
+                noise_level=noise_level,
+            )
+
+            # Attach KD losses to output
+            if isinstance(outputs, dict):
+                outputs["kd_losses"] = kd_result
+                outputs["kd_loss"] = kd_result["kd_total_loss"] * self._kd_weight
+            else:
+                outputs = {
+                    "detection_output": outputs,
+                    "kd_losses": kd_result,
+                    "kd_loss": kd_result["kd_total_loss"] * self._kd_weight,
+                }
+
+        return outputs
+
+    @torch.no_grad()
+    def get_model_info(self) -> Dict:
+        """Get model info including teacher and KD details."""
+        info = super().get_model_info()
+        teacher_params = sum(
+            p.numel() for p in self.teacher_model.parameters()
+        )
+        kd_params = sum(
+            p.numel() for p in self.kd_wrapper.parameters()
+        )
+        info["teacher_params_M"] = teacher_params / 1e6
+        info["kd_wrapper_params"] = kd_params
+        info["kd_weight"] = self._kd_weight
+        return info
